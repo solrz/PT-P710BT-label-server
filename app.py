@@ -55,14 +55,14 @@ def render_label(text, font_size=48, orientation="vertical"):
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    margin = 4
+    margin = 0
 
     if orientation == "horizontal":
         # Text along the tape: image is tall (tape length), 128px wide
         # First render text normally
-        text_img = Image.new("RGBA", (tw + margin * 2, th + margin * 2), (255, 255, 255, 0))
+        text_img = Image.new("RGBA", (tw, th), (255, 255, 255, 0))
         text_draw = ImageDraw.Draw(text_img)
-        text_draw.text((margin, margin - bbox[1]), text, font=font, fill=(0, 0, 0, 255))
+        text_draw.text((-bbox[0], -bbox[1]), text, font=font, fill=(0, 0, 0, 255))
 
         # Scale to fit 128px width if needed
         if text_img.height > PRINT_HEAD_PIXELS:
@@ -79,9 +79,9 @@ def render_label(text, font_size=48, orientation="vertical"):
         img.paste(rotated, (0, y_offset), rotated)
     else:
         # Default vertical: text across the tape width
-        img = Image.new("RGBA", (tw + margin * 2, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
+        img = Image.new("RGBA", (tw, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
         draw = ImageDraw.Draw(img)
-        draw.text((margin, (PRINT_HEAD_PIXELS - th) // 2 - bbox[1]), text,
+        draw.text((-bbox[0], (PRINT_HEAD_PIXELS - th) // 2 - bbox[1]), text,
                   font=font, fill=(0, 0, 0, 255))
 
     return img
