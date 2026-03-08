@@ -58,25 +58,73 @@ def render_label(text, font_size=48, orientation="vertical"):
     margin = 0
 
     if orientation == "horizontal":
-        # Text along the tape: image is tall (tape length), 128px wide
-        # First render text normally
-        text_img = Image.new("RGBA", (tw, th), (255, 255, 255, 0))
-        text_draw = ImageDraw.Draw(text_img)
-        text_draw.text((-bbox[0], -bbox[1]), text, font=font, fill=(0, 0, 0, 255))
+        # Text reads along the tape length.
+        # Wrap text into multiple lines to fit within 128px tape width.
+        # Each line's height must fit so total height ≤ 128px.
 
-        # Scale to fit 128px width if needed
-        if text_img.height > PRINT_HEAD_PIXELS:
-            ratio = PRINT_HEAD_PIXELS / text_img.height
-            text_img = text_img.resize(
-                (int(text_img.width * ratio), PRINT_HEAD_PIXELS), Image.LANCZOS)
+        # Measure single char height
+        char_bbox = draw.textbbox((0, 0), "國", font=font)
+        line_h = char_bbox[3] - char_bbox[1]
+
+        # How many lines can fit in 128px?
+        max_lines = max(1, PRINT_HEAD_PIXELS // line_h)
+
+        # Try to wrap text into lines that fit
+        # Start with 1 line, increase if text is too wide
+        lines = [text]
+        if max_lines > 1:
+            # Calculate approximate chars per line for even distribution
+            avg_char_w = tw / max(len(text), 1)
+            # Target: balance line lengths, keep within max_lines
+            for n in range(1, max_lines + 1):
+                chars_per_line = len(text) / n
+                test_lines = []
+                for i in range(n):
+                    start = round(i * chars_per_line)
+                    end = round((i + 1) * chars_per_line)
+                    test_lines.append(text[start:end])
+                # Check if each line fits reasonably
+                max_w = max(draw.textbbox((0, 0), l, font=font)[2] -
+                           draw.textbbox((0, 0), l, font=font)[0] for l in test_lines if l)
+                total_h = n * line_h
+                if total_h <= PRINT_HEAD_PIXELS:
+                    lines = [l for l in test_lines if l]
+                    if n == 1:
+                        continue  # try more lines to see if it's better
+                    break
+
+        # Render multi-line text
+        line_widths = []
+        line_bboxes = []
+        for l in lines:
+            bb = draw.textbbox((0, 0), l, font=font)
+            line_widths.append(bb[2] - bb[0])
+            line_bboxes.append(bb)
+
+        max_line_w = max(line_widths) if line_widths else 1
+        total_text_h = len(lines) * line_h
+
+        # Create image: width = max line width, height = 128px
+        text_img = Image.new("RGBA", (max_line_w, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
+        text_draw = ImageDraw.Draw(text_img)
+
+        # Center all lines vertically
+        y_start = (PRINT_HEAD_PIXELS - total_text_h) // 2
+        for i, l in enumerate(lines):
+            bb = line_bboxes[i]
+            lw = line_widths[i]
+            # Center each line horizontally
+            x = (max_line_w - lw) // 2 - bb[0]
+            y = y_start + i * line_h - bb[1]
+            text_draw.text((x, y), l, font=font, fill=(0, 0, 0, 255))
 
         # Rotate 90° CCW so text reads along tape direction
         rotated = text_img.rotate(90, expand=True)
 
-        # Create final image: 128px tall, width = rotated width
+        # Create final image: 128px tall
         img = Image.new("RGBA", (rotated.width, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
         y_offset = (PRINT_HEAD_PIXELS - rotated.height) // 2
-        img.paste(rotated, (0, y_offset), rotated)
+        img.paste(rotated, (0, max(0, y_offset)), rotated)
     else:
         # Default vertical: text across the tape width
         img = Image.new("RGBA", (tw, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
