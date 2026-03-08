@@ -3,8 +3,8 @@
 Brother PT-P710BT Label Print Service
 
 API:
-  POST /print    {"text": "Hello", "size": 48, "cut": true}
-  POST /preview  {"text": "Hello", "size": 48}  → PNG image
+  POST /print    {"text": "Hello", "size": 48, "cut": true, "orientation": "vertical"}
+  POST /preview  {"text": "Hello", "size": 48, "orientation": "vertical"}  → PNG image
   GET  /         Web UI
 
 Writes directly to /dev/usb/lp0
@@ -41,24 +41,54 @@ def get_font(size):
     return ImageFont.load_default()
 
 
-def render_label(text, font_size=48):
-    """Render text to a 128px-tall RGBA image."""
+def render_label(text, font_size=48, orientation="vertical"):
+    """
+    Render text to a label image.
+
+    orientation:
+      "vertical"   — text reads top-to-bottom across the tape (default, short labels)
+      "horizontal" — text reads along the tape length (long labels, rotated 90°)
+    """
     font = get_font(font_size)
     dummy = Image.new("RGBA", (1, 1))
     draw = ImageDraw.Draw(dummy)
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    margin = 8
-    img = Image.new("RGBA", (tw + margin * 2, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    draw.text((margin, (PRINT_HEAD_PIXELS - th) // 2 - bbox[1]), text,
-              font=font, fill=(0, 0, 0, 255))
+    margin = 4
+
+    if orientation == "horizontal":
+        # Text along the tape: image is tall (tape length), 128px wide
+        # First render text normally
+        text_img = Image.new("RGBA", (tw + margin * 2, th + margin * 2), (255, 255, 255, 0))
+        text_draw = ImageDraw.Draw(text_img)
+        text_draw.text((margin, margin - bbox[1]), text, font=font, fill=(0, 0, 0, 255))
+
+        # Scale to fit 128px width if needed
+        if text_img.height > PRINT_HEAD_PIXELS:
+            ratio = PRINT_HEAD_PIXELS / text_img.height
+            text_img = text_img.resize(
+                (int(text_img.width * ratio), PRINT_HEAD_PIXELS), Image.LANCZOS)
+
+        # Rotate 90° CCW so text reads along tape direction
+        rotated = text_img.rotate(90, expand=True)
+
+        # Create final image: 128px tall, width = rotated width
+        img = Image.new("RGBA", (rotated.width, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
+        y_offset = (PRINT_HEAD_PIXELS - rotated.height) // 2
+        img.paste(rotated, (0, y_offset), rotated)
+    else:
+        # Default vertical: text across the tape width
+        img = Image.new("RGBA", (tw + margin * 2, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
+        draw = ImageDraw.Draw(img)
+        draw.text((margin, (PRINT_HEAD_PIXELS - th) // 2 - bbox[1]), text,
+                  font=font, fill=(0, 0, 0, 255))
+
     return img
 
 
 def image_to_raster(img):
-    """RGBA image → raster byte array."""
+    """RGBA image → raster byte array, with trailing blank lines stripped."""
     img = img.convert("RGBA")
     if img.height != PRINT_HEAD_PIXELS:
         ratio = PRINT_HEAD_PIXELS / img.height
@@ -67,14 +97,30 @@ def image_to_raster(img):
     w, h = img.size
     alpha_rows = [[pixels[x, y][3] for x in range(w)] for y in range(h)]
     rotated = list(zip(*alpha_rows))
-    buf = bytearray()
+
+    # Build raster lines
+    lines = []
     for line in rotated:
+        row = bytearray()
         for i in range(0, len(line), 8):
             byte = 0
             for j in range(8):
                 if i + j < len(line) and line[i + j] > 0:
                     byte |= (1 << (7 - j))
-            buf.append(byte)
+            row.append(byte)
+        lines.append(bytes(row))
+
+    # Strip trailing blank lines
+    while lines and all(b == 0 for b in lines[-1]):
+        lines.pop()
+
+    # Strip leading blank lines
+    while lines and all(b == 0 for b in lines[0]):
+        lines.pop(0)
+
+    buf = bytearray()
+    for line in lines:
+        buf.extend(line)
     return buf
 
 
@@ -137,7 +183,6 @@ def image_to_preview_png(img):
     bg = Image.new("RGB", img.size, (255, 255, 255))
     bg.paste(img, mask=img.split()[3])
 
-    # Add a thin border to simulate label tape
     border = 2
     preview = Image.new("RGB",
         (bg.width + border * 2, bg.height + border * 2), (200, 200, 200))
@@ -173,9 +218,15 @@ def index():
   input:focus, select:focus { border-color: #007AFF; }
   .row { display: flex; gap: 10px; align-items: end; }
   .row > div { flex: 1; }
-  .toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 14px;
+  .toggles { margin-bottom: 14px; }
+  .toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
             font-size: 14px; color: #333; cursor: pointer; user-select: none; }
-  .toggle input { width: 18px; height: 18px; accent-color: #007AFF; }
+  .toggle input[type=checkbox] { width: 18px; height: 18px; accent-color: #007AFF; }
+  .orient-row { display: flex; gap: 6px; margin-bottom: 14px; }
+  .orient-btn { flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 14px;
+                border: 2px solid #e0e0e0; background: white; cursor: pointer;
+                text-align: center; transition: all 0.15s; font-weight: 500; }
+  .orient-btn.active { border-color: #007AFF; background: #EBF5FF; color: #007AFF; }
   .btn-row { display: flex; gap: 10px; margin-top: 4px; }
   button { flex: 1; padding: 12px 16px; border-radius: 10px; font-size: 16px;
            border: none; cursor: pointer; font-weight: 600; transition: all 0.15s; }
@@ -216,10 +267,22 @@ def index():
     </div>
   </div>
 
-  <label class="toggle">
-    <input type="checkbox" id="cut" checked>
-    自動裁切
-  </label>
+  <label>方向</label>
+  <div class="orient-row">
+    <div class="orient-btn active" data-val="vertical" onclick="setOrient(this)">
+      直式 ↕️
+    </div>
+    <div class="orient-btn" data-val="horizontal" onclick="setOrient(this)">
+      橫式 ↔️
+    </div>
+  </div>
+
+  <div class="toggles">
+    <label class="toggle">
+      <input type="checkbox" id="cut" checked>
+      自動裁切
+    </label>
+  </div>
 
   <div id="preview-box">
     <img id="preview-img" alt="preview">
@@ -236,6 +299,14 @@ def index():
 
 <script>
 let previewTimer = null;
+let orientation = 'vertical';
+
+function setOrient(el) {
+  document.querySelectorAll('.orient-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  orientation = el.dataset.val;
+  autoPreview();
+}
 
 function autoPreview() {
   clearTimeout(previewTimer);
@@ -258,7 +329,7 @@ async function doPreview() {
     const res = await fetch('/preview', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, size})
+      body: JSON.stringify({text, size, orientation})
     });
     if (res.ok) {
       const blob = await res.blob();
@@ -288,7 +359,7 @@ async function doPrint() {
     const res = await fetch('/print', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text, size, cut})
+      body: JSON.stringify({text, size, cut, orientation})
     });
     const data = await res.json();
     if (data.ok) {
@@ -320,6 +391,7 @@ def do_preview():
     data = request.get_json(silent=True) or {}
     text = data.get("text", "").strip()
     size = int(data.get("size", 48))
+    orient = data.get("orientation", "vertical")
 
     if not text:
         return jsonify(ok=False, error="沒有文字"), 400
@@ -327,7 +399,7 @@ def do_preview():
     size = max(16, min(128, size))
 
     try:
-        img = render_label(text, font_size=size)
+        img = render_label(text, font_size=size, orientation=orient)
         png_buf = image_to_preview_png(img)
         resp = send_file(png_buf, mimetype="image/png")
         resp.headers["X-Label-Width"] = str(img.width)
@@ -343,6 +415,7 @@ def do_print():
     text = data.get("text", "").strip()
     size = int(data.get("size", 48))
     auto_cut = data.get("cut", True)
+    orient = data.get("orientation", "vertical")
 
     if not text:
         return jsonify(ok=False, error="沒有文字"), 400
@@ -350,13 +423,15 @@ def do_print():
     size = max(16, min(128, size))
 
     try:
-        img = render_label(text, font_size=size)
+        img = render_label(text, font_size=size, orientation=orient)
         raster = image_to_raster(img)
         print_data = build_print_data(raster, auto_cut=auto_cut)
         send_to_printer(print_data)
         n_lines = len(raster) // RASTER_LINE_BYTES
         cut_text = "自動裁切" if auto_cut else "不裁切"
-        return jsonify(ok=True, message=f"已列印「{text}」({n_lines} lines, {cut_text})")
+        orient_text = "橫式" if orient == "horizontal" else "直式"
+        return jsonify(ok=True,
+            message=f"已列印「{text}」({n_lines} lines, {orient_text}, {cut_text})")
     except Exception as e:
         return jsonify(ok=False, error=str(e)), 500
 
