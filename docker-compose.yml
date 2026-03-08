@@ -1,0 +1,11 @@
+services:
+  label-service:
+    build: .
+    container_name: label-service
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    devices:
+      - /dev/usb/lp0:/dev/usb/lp0
+    environment:
+      - PRINTER_DEVICE=/dev/usb/lp0
