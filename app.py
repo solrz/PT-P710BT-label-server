@@ -378,9 +378,7 @@ async function doPrint() {
   btn.textContent = '列印 🖨️';
 }
 
-document.getElementById('text').addEventListener('keydown', e => {
-  if (e.key === 'Enter') doPrint();
-});
+
 </script>
 </body>
 </html>"""
