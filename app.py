@@ -49,7 +49,7 @@ def render_label(text, font_size=48):
     bbox = draw.textbbox((0, 0), text, font=font)
     tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    margin = 40
+    margin = 8
     img = Image.new("RGBA", (tw + margin * 2, PRINT_HEAD_PIXELS), (255, 255, 255, 0))
     draw = ImageDraw.Draw(img)
     draw.text((margin, (PRINT_HEAD_PIXELS - th) // 2 - bbox[1]), text,
@@ -103,8 +103,8 @@ def build_print_data(raster_data, tape_mm=24, auto_cut=True):
     # Mode: auto-cut on (0x40) or off (0x00)
     buf.extend(b"\x1b\x69\x4d")
     buf.extend(bytes([0x40 if auto_cut else 0x00]))
-    # Margin = 28 dots
-    buf.extend(b"\x1b\x69\x64\x1c\x00")
+    # Margin = 3 dots (minimum)
+    buf.extend(b"\x1b\x69\x64\x03\x00")
     # TIFF compression
     buf.extend(b"\x4d\x02")
 
