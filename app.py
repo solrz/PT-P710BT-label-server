@@ -98,14 +98,15 @@ def build_print_data(raster_data, tape_mm=24, auto_cut=True):
     buf.extend(b"\x00")
     buf.extend(struct.pack("<H", n_lines))
     buf.extend(b"\x00\x00\x00\x00")
-    # Chaining: off (0x08) = last page, will cut; on (0x00) = more pages coming, won't cut
+    # Advanced mode:
+    #   0x08 = no chain (last page, cut after)
+    #   0x00 = chain (more pages, cut previous but not this one)
     buf.extend(b"\x1b\x69\x4b")
     buf.extend(bytes([0x08 if auto_cut else 0x00]))
-    # Mode: auto-cut on (0x40) or off (0x00)
-    buf.extend(b"\x1b\x69\x4d")
-    buf.extend(bytes([0x40 if auto_cut else 0x00]))
-    # Margin = 3 dots (minimum)
-    buf.extend(b"\x1b\x69\x64\x03\x00")
+    # Mode: auto-cut always on (0x40) — chain mode controls whether it actually cuts
+    buf.extend(b"\x1b\x69\x4d\x40")
+    # Margin = 0 dots
+    buf.extend(b"\x1b\x69\x64\x00\x00")
     # TIFF compression
     buf.extend(b"\x4d\x02")
 
@@ -121,8 +122,8 @@ def build_print_data(raster_data, tape_mm=24, auto_cut=True):
             buf.extend(struct.pack("<H", len(compressed)))
             buf.extend(compressed)
 
-    # Print: 0x1A = print and feed (for cut), 0x0C = print without feed (no cut)
-    buf.extend(b"\x1a" if auto_cut else b"\x0c")
+    # Always use 0x1A (print with feeding) — chain mode handles cut behavior
+    buf.extend(b"\x1a")
     return bytes(buf)
 
 
