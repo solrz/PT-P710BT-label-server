@@ -216,6 +216,12 @@ def build_print_data(raster_data, tape_mm=24, auto_cut=True):
             buf.extend(struct.pack("<H", len(compressed)))
             buf.extend(compressed)
 
+    # When chaining (no cut), add padding blank lines so the cutter
+    # doesn't clip the next label when it eventually cuts
+    if not auto_cut:
+        for _ in range(10):
+            buf.extend(b"\x5a")  # 10 blank raster lines as cutter offset buffer
+
     # Always use 0x1A (print with feeding) — chain mode handles cut behavior
     buf.extend(b"\x1a")
     return bytes(buf)
